@@ -8,6 +8,7 @@
 #include "vroom_vec.h"
 
 cpp11::strings read_chr(vroom_vec_info* info);
+void fill_chr(vroom_vec_info* info, SEXP out);
 SEXP check_na(SEXP na, SEXP val);
 
 struct vroom_chr : vroom_vec {
@@ -45,6 +46,20 @@ public:
 
   // ALTSTRING methods -----------------
 
+  // Keep strings created by string_Elt() reachable through data1. New
+  // STRSXPs contain R_BlankString, which serves as the cache miss marker.
+  // Empty strings share this permanent singleton and do not need rooting.
+  static SEXP EltCache(SEXP vec) {
+    SEXP ptr = R_altrep_data1(vec);
+    SEXP cache = R_ExternalPtrProtected(ptr);
+    if (cache == nullptr || TYPEOF(cache) != STRSXP) {
+      cache = PROTECT(Rf_allocVector(STRSXP, Length(vec)));
+      R_SetExternalPtrProtected(ptr, cache);
+      UNPROTECT(1);
+    }
+    return cache;
+  }
+
   static SEXP Val(SEXP vec, R_xlen_t i) {
     auto& info = Info(vec);
 
@@ -80,7 +95,16 @@ public:
     }
     SPDLOG_TRACE("{0:x}: vroom_chr string_Elt {1}", (size_t)vec, i);
 
-    return Val(vec, i);
+    SEXP cache = EltCache(vec);
+    SEXP val = STRING_ELT(cache, i);
+    if (val == R_BlankString) {
+      val = PROTECT(Val(vec, i));
+      if (val != R_BlankString) {
+        SET_STRING_ELT(cache, i, val);
+      }
+      UNPROTECT(1);
+    }
+    return val;
   }
 
   // --- Altvec
@@ -91,12 +115,22 @@ public:
     }
 
     SPDLOG_TRACE("{0:x}: vroom_chr Materialize", (size_t)vec);
+    SEXP data1 = R_altrep_data1(vec);
+    SEXP cache = R_ExternalPtrProtected(data1);
+    if (cache != nullptr && TYPEOF(cache) == STRSXP) {
+      fill_chr(&Info(vec), cache);
+      R_set_altrep_data2(vec, cache);
+
+      // Once we have materialized we no longer need the cache or info
+      R_SetExternalPtrProtected(data1, R_NilValue);
+      Finalize(data1);
+
+      return cache;
+    }
+
     auto out = read_chr(&Info(vec));
     R_set_altrep_data2(vec, out);
-
-    // Once we have materialized we no longer need the info
-    Finalize(R_altrep_data1(vec));
-
+    Finalize(data1);
     return out;
   }
 

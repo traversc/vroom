@@ -35,3 +35,35 @@ test_that("encodings are respected", {
   )
   expect_equal(x[[1]], expected)
 })
+
+test_that("ALTREP character elements stay alive across allocations", {
+  path <- withr::local_tempfile()
+  # Use raw bytes so no ordinary character vector keeps the input string alive.
+  writeBin(
+    as.raw(c(0x69L, rep.int(0x30L, 6L), 0x31L, 0x0aL)),
+    path
+  )
+  input <- vroom(
+    path,
+    delim = ",",
+    col_names = FALSE,
+    col_types = cols(X1 = col_character()),
+    altrep = "chr",
+    num_threads = 1L,
+    progress = FALSE,
+    show_col_types = FALSE
+  )[[1L]]
+
+  target_value <- rawToChar(as.raw(c(0xe9L, rep.int(0x78L, 6L))))
+  Encoding(target_value) <- "latin1"
+  target <- rep.int(target_value, 256L)
+
+  gctorture(TRUE)
+  withr::defer(gctorture(FALSE))
+  first <- charmatch(input, target, nomatch = NA_integer_)
+  second <- charmatch(input, target, nomatch = NA_integer_)
+  gctorture(FALSE)
+
+  expect_identical(first, NA_integer_)
+  expect_identical(second, NA_integer_)
+})

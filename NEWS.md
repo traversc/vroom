@@ -1,5 +1,7 @@
 # vroom (development version)
 
+* `vroom()` now keeps individually accessed strings from lazy character columns alive across later allocations.
+
 # vroom 1.7.1
 
 * Internal changes requested by CRAN for forward compatibility with clang 22.

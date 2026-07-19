@@ -12,6 +12,34 @@ SEXP check_na(SEXP na, SEXP val) {
   return val;
 }
 
+void fill_chr(vroom_vec_info* info, SEXP out) {
+  SEXP nas = *info->na;
+
+  cpp11::unwind_protect([&] {
+    auto i = 0;
+    auto col = info->column;
+    for (auto b = col->begin(), e = col->end(); b != e; ++b) {
+      if (STRING_ELT(out, i) != R_BlankString) {
+        ++i;
+        continue;
+      }
+
+      auto str = *b;
+      auto val = info->locale->encoder_.makeSEXP(str.begin(), str.end(), true);
+      PROTECT(val);
+      if (Rf_xlength(val) < str.end() - str.begin()) {
+        info->errors->add_error(
+            b.index(), col->get_index(), "", "embedded null", b.filename());
+      }
+
+      SET_STRING_ELT(out, i++, check_na(nas, val));
+      UNPROTECT(1);
+    }
+  });
+
+  info->errors->warn_for_errors();
+}
+
 cpp11::strings read_chr(vroom_vec_info* info) {
 
   R_xlen_t n = info->column->size();
